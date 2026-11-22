@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>PookieBot Expressive Face & Voice Controller</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    body {
+      background-color: #050811;
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+
+    #face-canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      cursor: pointer;
+    }
+
+    /* Top HUD */
+    #status-pill {
+      position: absolute;
+      top: 14px;
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.6);
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      background: rgba(15, 23, 42, 0.6);
+      padding: 4px 14px;
+      border-radius: 20px;
+      backdrop-filter: blur(8px);
+    }
+
+    #speech-hud {
+      position: absolute;
+      top: 48px;
+      font-size: 14px;
+      color: #38bdf8;
+      font-weight: 500;
+      background: rgba(15, 23, 42, 0.5);
+      padding: 4px 16px;
+      border-radius: 12px;
+      pointer-events: none;
+      transition: all 0.3s;
+    }
+
+    /* Floating control bar for maneuvers & speech */
+    #ui-bar {
+      position: absolute;
+      bottom: 14px;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 6px;
+      opacity: 0.35;
+      transition: opacity 0.3s ease;
+      background: rgba(15, 23, 42, 0.85);
+      padding: 8px 16px;
+      border-radius: 24px;
+      backdrop-filter: blur(12px);
+      max-width: 90vw;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    #ui-bar:hover, #ui-bar:focus-within {
+      opacity: 0.98;
+    }
+
+    .btn {
+      background: rgba(255, 255, 255, 0.12);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: #e2e8f0;
+      padding: 6px 12px;
+      border-radius: 14px;
+      font-size: 12px;
+      cursor: pointer;
+      font-weight: 600;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .btn:hover {
+      background: #38bdf8;
+      color: #030712;
+      border-color: #38bdf8;
+      transform: translateY(-1px);
+    }
+
+    .btn-action {
+      background: rgba(56, 189, 248, 0.25);
+      border-color: rgba(56, 189, 248, 0.5);
+      color: #38bdf8;
+    }
+
+    .btn-action:hover {
+      background: #38bdf8;
+      color: #030712;
+    }
+
+    .btn-mic {
+      background: rgba(239, 68, 68, 0.25);
+      border-color: rgba(239, 68, 68, 0.5);
+      color: #f87171;
+    }
+
+    .btn-mic.listening {
+      background: #ef4444;
+      color: #ffffff;
+      animation: pulse 1s infinite;
+    }
+
+    @keyframes pulse {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.08); }
+      100% { transform: scale(1); }
+    }
+  </style>
+</head>
+<body>
+
+  <div id="status-pill">PookieBot Face &bull; <span id="conn-status">CONNECTING...</span> &bull; Mood: <span id="emotion-label">NEUTRAL</span></div>
+  <div id="speech-hud">Click 🎙️ to talk or tap any maneuver below</div>
+
+  <canvas id="face-canvas"></canvas>
+
+  <div id="ui-bar">
+    <!-- Live Voice Speech Control -->
+    <button class="btn btn-mic" id="mic-btn" onclick="toggleVoiceRecognition()">🎙️ Speak</button>
+
+    <!-- Physical AI Maneuvers (Drives the MuJoCo robot car live!) -->
+    <button class="btn btn-action" onclick="sendRobotCommand('approach object')">🚀 Approach Object</button>
+    <button class="btn btn-action" onclick="sendRobotCommand('dance')">💃 Dance</button>
+    <button class="btn btn-action" onclick="sendRobotCommand('patrol nursery')">🛡️ Patrol</button>
+    <button class="btn btn-action" onclick="sendRobotCommand('sing lullaby')">🎵 Lullaby</button>
+
+    <!-- Direct Motion -->
+    <button class="btn" onclick="sendRobotCommand('forward')">⬆️ Fwd</button>
+    <button class="btn" onclick="sendRobotCommand('backward')">⬇️ Back</button>
+    <button class="btn" onclick="sendRobotCommand('turn left')">⬅️ Left</button>
+    <button class="btn" onclick="sendRobotCommand('turn right')">➡️ Right</button>
+    <button class="btn" onclick="sendRobotCommand('stop')" style="color:#f87171">🛑 Stop</button>
+
+    <!-- Face Emotions -->
+    <button class="btn" onclick="setEmotion('HAPPY')">Happy</button>
+    <button class="btn" onclick="setEmotion('LOVING')">Love</button>
+    <button class="btn" onclick="setEmotion('SLEEPY')">Sleepy</button>
+    <button class="btn" onclick="toggleFullscreen()">⛶ Full</button>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('face-canvas');
+    const ctx = canvas.getContext('2d');
+    const emotionLabel = document.getElementById('emotion-label');
+    const speechHud = document.getElementById('speech-hud');
+    const connStatus = document.getElementById('conn-status');
+    const micBtn = document.getElementById('mic-btn');
+
+    // Canvas sizing
+    function resize() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // Eye Engine State
+    let currentEmotion = 'NEUTRAL';
+    let eyeState = {
+      width: 140,
+      height: 200,
+      spacing: 90,
+      cornerRadius: 45,
+      scaleX: 1.0,
+      scaleY: 1.0,
+      offsetX: 0,
+      offsetY: 0,
+      tiltL: 0,
+      tiltR: 0,
+      blinkProgress: 0.0,
+      glowColor: '#38bdf8',
+      lidTopL: 0,
+      lidTopR: 0,
+      lidBottomL: 0,
+      lidBottomR: 0
+    };
+    let targetState = { ...eyeState };
+
+    // Procedural Blink
+    let isBlinking = false;
+    function scheduleBlink() {
+      setTimeout(() => {
+        triggerBlink();
+        scheduleBlink();
+      }, Math.random() * 3500 + 2500);
+    }
+    scheduleBlink();
+
+    function triggerBlink() {
+      if (isBlinking) return;
+      isBlinking = true;
+      let start = performance.now();
+      function animateBlink(now) {
+        let elapsed = now - start;
+        let progress = elapsed / 160;
+        if (progress < 0.5) eyeState.blinkProgress = progress * 2;
+        else if (progress <= 1.0) eyeState.blinkProgress = 2 - (progress * 2);
+        else {
+          eyeState.blinkProgress = 0;
+          isBlinking = false;
+          return;
+        }
+        requestAnimationFrame(animateBlink);
+      }
+      requestAnimationFrame(animateBlink);
+    }
+
+    // Micro-saccades
+    setInterval(() => {
+      if (currentEmotion === 'SLEEPY') {
+        targetState.offsetX = 0;
+        targetState.offsetY = 15;
+        return;
+      }
+      targetState.offsetX = (Math.random() - 0.5) * 60;
+      targetState.offsetY = (Math.random() - 0.5) * 35;
+    }, 2800);
+
+    // Emotion definitions
+    function setEmotion(emotion) {
+      currentEmotion = emotion.toUpperCase();
+      emotionLabel.innerText = currentEmotion;
+
+      switch (currentEmotion) {
+        case 'HAPPY':
+          targetState.scaleX = 1.05;
+          targetState.scaleY = 0.85;
+          targetState.tiltL = -0.12;
+          targetState.tiltR = 0.12;
+          targetState.lidBottomL = 0.45;
+          targetState.lidBottomR = 0.45;
+          targetState.lidTopL = 0.0;
+          targetState.lidTopR = 0.0;
+          targetState.glowColor = '#38bdf8';
+          playChirpSound('happy');
+          break;
+
+        case 'CURIOUS':
+          targetState.scaleX = 1.0;
+          targetState.scaleY = 1.1;
+          targetState.tiltL = -0.25;
+          targetState.tiltR = -0.15;
+          targetState.lidBottomL = 0.1;
+          targetState.lidBottomR = 0.0;
+          targetState.lidTopL = 0.0;
+          targetState.lidTopR = 0.1;
+          targetState.glowColor = '#2dd4bf';
+          playChirpSound('curious');
+          break;
+
+        case 'LOVING':
+          targetState.scaleX = 1.0;
+          targetState.scaleY = 0.9;
+          targetState.tiltL = 0.08;
+          targetState.tiltR = -0.08;
+          targetState.lidBottomL = 0.35;
+          targetState.lidBottomR = 0.35;
+          targetState.glowColor = '#f472b6';
+          playChirpSound('love');
+          break;
+
+        case 'SLEEPY':
+          targetState.scaleX = 0.95;
+          targetState.scaleY = 0.45;
+          targetState.tiltL = 0.0;
+          targetState.tiltR = 0.0;
+          targetState.lidTopL = 0.65;
+          targetState.lidTopR = 0.65;
+          targetState.lidBottomL = 0.1;
+          targetState.lidBottomR = 0.1;
+          targetState.glowColor = '#818cf8';
+          playChirpSound('sleepy');
+          break;
+
+        case 'ALERT':
+          targetState.scaleX = 1.15;
+          targetState.scaleY = 1.15;
+          targetState.tiltL = 0;
+          targetState.tiltR = 0;
+          targetState.lidTopL = 0;
+          targetState.lidTopR = 0;
+          targetState.lidBottomL = 0;
+          targetState.lidBottomR = 0;
+          targetState.glowColor = '#fbbf24';
+          playChirpSound('curious');
+          break;
+
+        case 'NEUTRAL':
+        default:
+          targetState.scaleX = 1.0;
+          targetState.scaleY = 1.0;
+          targetState.tiltL = 0;
+          targetState.tiltR = 0;
+          targetState.lidTopL = 0;
+          targetState.lidTopR = 0;
+          targetState.lidBottomL = 0;
+          targetState.lidBottomR = 0;
+          targetState.glowColor = '#38bdf8';
+          break;
+      }
+    }
+
+    // Web Audio Synthesizer
+    let audioCtx = null;
+    function playChirpSound(type = 'happy') {
+      try {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+
+        const now = audioCtx.currentTime;
+        gain.gain.setValueAtTime(0.12, now);
+
+        if (type === 'happy') {
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(587.33, now);
+          osc.frequency.exponentialRampToValueAtTime(880.00, now + 0.08);
+          osc.frequency.exponentialRampToValueAtTime(1174.66, now + 0.18);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+          osc.start(now);
+          osc.stop(now + 0.22);
+        } else if (type === 'curious') {
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(440, now);
+          osc.frequency.linearRampToValueAtTime(740, now + 0.15);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+          osc.start(now);
+          osc.stop(now + 0.18);
+        } else if (type === 'love') {
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(523.25, now);
+          osc.frequency.exponentialRampToValueAtTime(659.25, now + 0.12);
+          osc.frequency.exponentialRampToValueAtTime(783.99, now + 0.25);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.32);
+          osc.start(now);
+          osc.stop(now + 0.32);
+        } else if (type === 'sleepy') {
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(440, now);
+          osc.frequency.linearRampToValueAtTime(330, now + 0.35);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.40);
+          osc.start(now);
+          osc.stop(now + 0.40);
+        }
+      } catch (e) {}
+    }
+
+    // Speech Synthesizer (Talk Back Voice)
+    function speakText(text) {
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+        const utter = new SpeechSynthesisUtterance(text);
+        utter.rate = 1.0;
+        utter.pitch = 1.25; // Gentle, cute voice
+        window.speechSynthesis.speak(utter);
+      }
+    }
+
+    // Linear interpolation
+    function lerp(start, end, factor) {
+      return start + (end - start) * factor;
+    }
+
+    // Render Loop
+    function render() {
+      eyeState.scaleX = lerp(eyeState.scaleX, targetState.scaleX, 0.12);
+      eyeState.scaleY = lerp(eyeState.scaleY, targetState.scaleY, 0.12);
+      eyeState.offsetX = lerp(eyeState.offsetX, targetState.offsetX, 0.1);
+      eyeState.offsetY = lerp(eyeState.offsetY, targetState.offsetY, 0.1);
+      eyeState.tiltL = lerp(eyeState.tiltL, targetState.tiltL, 0.1);
+      eyeState.tiltR = lerp(eyeState.tiltR, targetState.tiltR, 0.1);
+      eyeState.lidTopL = lerp(eyeState.lidTopL, targetState.lidTopL, 0.1);
+      eyeState.lidTopR = lerp(eyeState.lidTopR, targetState.lidTopR, 0.1);
+      eyeState.lidBottomL = lerp(eyeState.lidBottomL, targetState.lidBottomL, 0.1);
+      eyeState.lidBottomR = lerp(eyeState.lidBottomR, targetState.lidBottomR, 0.1);
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      const centerX = canvas.width / 2;
+      const centerY = canvas.height / 2;
+
+      const eyeW = eyeState.width * eyeState.scaleX;
+      const eyeH = eyeState.height * eyeState.scaleY * (1.0 - eyeState.blinkProgress);
+      const halfSpacing = eyeState.spacing / 2;
+
+      const leftX = centerX - halfSpacing - eyeW / 2 + eyeState.offsetX;
+      const rightX = centerX + halfSpacing + eyeW / 2 + eyeState.offsetX;
+      const eyeY = centerY + eyeState.offsetY;
+
+      drawSingleEye(leftX, eyeY, eyeW, eyeH, eyeState.tiltL, eyeState.lidTopL, eyeState.lidBottomL);
+      drawSingleEye(rightX, eyeY, eyeW, eyeH, eyeState.tiltR, eyeState.lidTopR, eyeState.lidBottomR);
+
+      requestAnimationFrame(render);
+    }
+
+    function drawSingleEye(x, y, w, h, tilt, lidTop, lidBottom) {
+      if (h <= 2) return;
+
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(tilt);
+
+      ctx.shadowColor = targetState.glowColor;
+      ctx.shadowBlur = 45;
+
+      const r = Math.min(eyeState.cornerRadius, h / 2, w / 2);
+      ctx.beginPath();
+      ctx.roundRect(-w / 2, -h / 2, w, h, r);
+
+      const grad = ctx.createLinearGradient(0, -h / 2, 0, h / 2);
+      grad.addColorStop(0, '#ffffff');
+      grad.addColorStop(0.3, targetState.glowColor);
+      grad.addColorStop(1, targetState.glowColor);
+      ctx.fillStyle = grad;
+      ctx.fill();
+
+      if (lidTop > 0) {
+        ctx.fillStyle = '#050811';
+        ctx.shadowBlur = 0;
+        ctx.beginPath();
+        ctx.rect(-w / 2 - 5, -h / 2 - 5, w + 10, h * lidTop + 5);
+        ctx.fill();
+      }
+
+      if (lidBottom > 0) {
+        ctx.fillStyle = '#050811';
+        ctx.shadowBlur = 0;
+        ctx.beginPath();
+        ctx.rect(-w / 2 - 5, h / 2 - (h * lidBottom), w + 10, h * lidBottom + 5);
+        ctx.fill();
+      }
+
+      ctx.restore();
+    }
+
+    // ========================================================
+    // Live WebSocket Client & Command Dispatcher
+    // ========================================================
+    let ws = null;
+    function connectWebSocket() {
+      const urlParams = new URLSearchParams(window.location.search);
+      const wsHost = urlParams.get('host') || window.location.hostname || 'localhost';
+      const wsPort = urlParams.get('port') || '8765';
+      const wsUrl = `ws://${wsHost}:${wsPort}`;
+
+      try {
+        ws = new WebSocket(wsUrl);
+
+        ws.onopen = () => {
+          connStatus.innerHTML = `<span style="color:#4ade80">● ONLINE (Brain Connected)</span>`;
+          speechHud.innerText = "Connected! Click 🎙️ Speak or tap maneuvers below";
+        };
+
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.type === 'emotion' && data.emotion) {
+              setEmotion(data.emotion);
+            } else if (data.type === 'sound' && data.sound) {
+              playChirpSound(data.sound);
+            } else if (data.type === 'gaze') {
+              if (typeof data.x === 'number') targetState.offsetX = data.x;
+              if (typeof data.y === 'number') targetState.offsetY = data.y;
+            } else if (data.type === 'blink') {
+              triggerBlink();
+            } else if (data.type === 'response' && data.text) {
+              speechHud.innerText = `🤖 "${data.text}"`;
+              speakText(data.text);
+            }
+          } catch (e) {}
+        };
+
+        ws.onclose = () => {
+          connStatus.innerHTML = `<span style="color:#94a3b8">○ STANDALONE</span>`;
+          setTimeout(connectWebSocket, 3000);
+        };
+
+        ws.onerror = () => ws.close();
+      } catch (e) {
+        setTimeout(connectWebSocket, 3000);
+      }
+    }
+    connectWebSocket();
+
+    function sendRobotCommand(cmd) {
+      speechHud.innerText = `Sending: "${cmd}"...`;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'robot_command', cmd: cmd }));
+      } else {
+        speechHud.innerText = `Sim offline - start python run_pookiebot.py`;
+      }
+    }
+
+    // ========================================================
+    // Built-in Web Speech API (Voice Recognition)
+    // ========================================================
+    let recognition = null;
+    let isListening = false;
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (SpeechRecognition) {
+      recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      recognition.lang = 'en-US';
+
+      recognition.onstart = () => {
+        isListening = true;
+        micBtn.classList.add('listening');
+        micBtn.innerText = "🛑 Listening...";
+        speechHud.innerText = "Listening... say 'Dance', 'Approach object', 'Forward', etc.";
+      };
+
+      recognition.onresult = (event) => {
+        const transcript = event.results[0][0].transcript;
+        speechHud.innerText = `Heard: "${transcript}"`;
+        sendRobotCommand(transcript);
+      };
+
+      recognition.onerror = (event) => {
+        speechHud.innerText = `Voice error: ${event.error}`;
+      };
+
+      recognition.onend = () => {
+        isListening = false;
+        micBtn.classList.remove('listening');
+        micBtn.innerText = "🎙️ Speak";
+      };
+    } else {
+      micBtn.style.display = "none";
+      console.warn("Web Speech API not supported in this browser.");
+    }
+
+    function toggleVoiceRecognition() {
+      if (!recognition) return;
+      if (isListening) {
+        recognition.stop();
+      } else {
+        recognition.start();
+      }
+    }
+
+    function toggleFullscreen() {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(err => alert(err.message));
+      } else {
+        document.exitFullscreen();
+      }
+    }
+
+    // Touch tap on canvas
+    canvas.addEventListener('click', () => {
+      const emotions = ['HAPPY', 'CURIOUS', 'LOVING', 'SLEEPY', 'NEUTRAL'];
+      const nextIndex = (emotions.indexOf(currentEmotion) + 1) % emotions.length;
+      setEmotion(emotions[nextIndex]);
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'tap', region: 'screen' }));
+      }
+    });
+
+    render();
+  </script>
+</body>
+</html>

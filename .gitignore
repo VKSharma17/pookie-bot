@@ -1,0 +1,28 @@
+# Python virtual environment
+.venv/
+env/
+venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# MuJoCo logs
+MUJOCO_LOG.TXT
+
+# Environment & local secrets
+.env
+.env.*
+
+# Media & recordings (ignore heavy video dumps, preserve showcase)
+*.mp4
+!pookiebot_showcase.mp4
+*.avi
+*.mcap
+
+# OS / Editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
