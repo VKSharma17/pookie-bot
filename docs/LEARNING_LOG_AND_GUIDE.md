@@ -185,6 +185,22 @@ In the interactive terminal prompt (`PookieBot ❯`), try these commands:
    * The animated eyes dart down, enter the `ALERT` expression, and emit a curious chirp.
    * The robot refuses to drive into the obstacle even if commanded!
 
+### Lab 5: Version Control & Scientific Reproducibility with Git
+Every physical AI project requires meticulous versioning to track physics calibrations, control models, and UI changes:
+1. Initialize repository: `git init`
+2. Audit `.gitignore` (excludes `.venv/`, `__pycache__/`, `MUJOCO_LOG.TXT`, local media dumps, while preserving calibrated models and the baseline showcase video).
+3. Stage and record baseline:
+   ```powershell
+   git add .
+   git commit -m "feat: initial PookieBot physical AI digital twin with MuJoCo sim, OpenBot HAL, animated face UI, and learning documentation"
+   ```
+4. Link to GitHub/GitLab remote:
+   ```powershell
+   git branch -M main
+   git remote add origin https://github.com/<your-username>/PookieBot.git
+   git push -u origin main
+   ```
+
 ---
 
 ## 4. Sim-to-Real Transferability Guarantee
