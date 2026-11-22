@@ -23,6 +23,8 @@ def record_demo_video(output_mp4: str = "pookiebot_showcase.mp4", width: int = 1
 
     renderer = mujoco.Renderer(model, height=height, width=width)
     bridge = SimRobotBridge(model, data)
+    from core.vision import SimVision
+    vision = SimVision(model, data, camera_name="robot_eye_camera")
 
     frames = []
 
@@ -34,13 +36,16 @@ def record_demo_video(output_mp4: str = "pookiebot_showcase.mp4", width: int = 1
             rgb = renderer.render()
             frames.append(cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR))
 
-    brain = PookieBrain(bridge, step_sim_fn=step_and_capture)
+    brain = PookieBrain(bridge=bridge, vision=vision, step_sim_fn=step_and_capture)
 
-    print("[VideoRecorder] Recording: Approaching object...")
-    brain.approach_object(stop_dist_m=0.22)
+    print("[VideoRecorder] Recording: Visual Servoing approach to Red Cube...")
+    brain.navigate_to_target("red_cube", stop_dist_m=0.22)
 
     print("[VideoRecorder] Recording: Celebratory dance...")
     brain.dance()
+
+    print("[VideoRecorder] Recording: Pure pursuit circular sweep...")
+    brain.drive_circle(radius_m=0.5)
 
     # Save to MP4
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")

@@ -136,6 +136,23 @@ def run_automated_test():
     res = brain.dance()
     print(f"  -> {res}")
 
+    # 8. Test Visual Servoing to Named Target ("go to red cube")
+    print("\n[Step 8] Testing Visual Servoing to Named Target ('red cube')...")
+    mujoco.mj_resetData(model, data)
+    mujoco.mj_forward(model, data)
+    res = brain.execute_instruction("go to red cube")
+    print(f"  -> {res}")
+    assert "navigated to" in res.lower() or "approached" in res.lower(), f"Visual servoing failed: {res}"
+
+    # 9. Test Pure Pursuit Trajectory Tracking
+    print("\n[Step 9] Testing Pure Pursuit Trajectory Tracking...")
+    mujoco.mj_resetData(model, data)
+    mujoco.mj_forward(model, data)
+    test_path = [(0.0, 0.0), (0.3, 0.15), (0.6, 0.25), (0.9, 0.15)]
+    res = brain.follow_drawn_path(test_path)
+    print(f"  -> {res}")
+    assert "completed" in res.lower(), f"Pure pursuit failed: {res}"
+
     face_server.stop()
     print("\n==================================================================")
     print("  🎉 ALL MODULAR SIMULATION TESTS PASSED WITH 100% SUCCESS! 🚀   ")
@@ -172,19 +189,34 @@ def run_interactive_app(args):
         brain = PookieBrain(bridge=bridge, face=face_server, vision=vision)
         viewer = None
 
-    # Connect Browser Face (Voice / Buttons) straight to the Brain
+    # Connect Browser Face (Voice / Buttons / Mini-Map Path) straight to the Brain
     face_server.on_command_callback = brain.execute_instruction
+    face_server.on_path_callback = brain.follow_drawn_path
 
     print("\n[PookieBot] Controls Ready:")
     print("  🎙️  Voice: Click 'Speak' on the Web Face and speak into mic!")
-    print("  🔘  Web UI: Tap 'Approach Object', 'Dance', 'Patrol', 'Lullaby' buttons.")
+    print("  🗺️  Mini-Map: Tap 'Map' to draw custom paths and send to Pure Pursuit follower!")
+    print("  🔘  Targets: Tap '🟥 Cube', '🟡 Ball', '🟢 Bottle', '⚡ Dock' for visual servoing.")
+    print("  💃  Maneuvers: 'Dance', 'Patrol', 'Lullaby', 'Scan Room'.")
     print("  🎮  3D Viewer: Focused window -> [W][A][S][D] to Drive, [Space] to Stop")
-    print("                  Key [1]=Approach, [2]=Dance, [3]=Lullaby, [4]=Patrol")
-    print("  ⌨️   Terminal: Type 'approach', 'dance', 'patrol', 'forward', 'love', 'quit'")
+    print("  ⌨️   Terminal: Type 'go to red cube', 'circle', 'square', 'scan room', etc.")
     print("==================================================================\n")
 
-    # Background viewer sync thread if MuJoCo GUI is active
+    # Background viewer sync & telemetry broadcast thread
     stop_event = threading.Event()
+    
+    def telemetry_loop():
+        """Periodically broadcast robot pose & telemetry to web face mini-map."""
+        while not stop_event.is_set():
+            try:
+                face_server.broadcast_telemetry(bridge.get_telemetry())
+            except Exception:
+                pass
+            time.sleep(0.06)  # ~16 Hz update rate
+
+    tt = threading.Thread(target=telemetry_loop, daemon=True)
+    tt.start()
+
     if viewer is not None:
         def viewer_loop():
             import mujoco

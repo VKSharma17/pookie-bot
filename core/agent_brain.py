@@ -9,10 +9,13 @@ Orchestrates the cognitive loop:
 
 import time
 import math
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 from .hal import BaseRobotBridge
 from .face_bridge import FaceBridgeServer
 from .vision import BaseVision
+from .visual_servoing import VisualServoingController, TargetDetector, TargetType
+from .path_follower import PurePursuitController
+from .vlm_agent import VLMAgent
 
 
 class PookieBrain:
@@ -33,6 +36,27 @@ class PookieBrain:
         self.state = "IDLE"
         self.current_emotion = "NEUTRAL"
         self.is_patrolling = False
+
+        # Spatial Navigation & Control Modules
+        self.detector = TargetDetector()
+        self.vlm = VLMAgent()
+        self.servoing = None
+        if self.vision:
+            self.servoing = VisualServoingController(
+                bridge=self.bridge,
+                vision=self.vision,
+                step_sim_fn=self.step_sim_fn
+            )
+        self.pursuit = PurePursuitController(
+            bridge=self.bridge,
+            step_sim_fn=self.step_sim_fn
+        )
+
+    def _face_callback(self, emotion: str, msg: str):
+        """Update face expression and speech output."""
+        self.express(emotion)
+        if self.face:
+            self.face.send_response(msg)
 
     def _sleep_or_step(self, duration_s: float):
         """Wait for duration, properly paced to simulation timestep."""
@@ -272,6 +296,85 @@ class PookieBrain:
         print("[PookieBrain Tool] Nursery patrol complete. Baby area is safe! 💖")
         return "Completed nursery patrol. All clear and safe!"
 
+    def navigate_to_target(self, target_name: str, stop_dist_m: float = 0.22) -> str:
+        """Tool: Closed-loop visual servoing to center and approach a named target."""
+        print(f"\n[PookieBrain Tool] navigate_to_target('{target_name}', stop_dist={stop_dist_m}m)")
+        if not self.servoing:
+            return "Visual servoing module is not enabled (requires vision camera)."
+
+        res = self.servoing.navigate_to_target(
+            target_name=target_name,
+            stop_dist_m=stop_dist_m,
+            face_callback=self._face_callback
+        )
+        if res["success"]:
+            self.express("LOVING", "happy")
+            return f"Successfully navigated to {res['target']}! Stopped at {res.get('final_sonar_m', 0.22)*100:.1f} cm."
+        else:
+            self.express("ALERT", "curious")
+            return f"Navigation to {target_name} incomplete: {res.get('reason', 'target not reached')}."
+
+    def follow_drawn_path(self, waypoints: List[Tuple[float, float]]) -> str:
+        """Tool: Pure Pursuit path tracking along 2D coordinates drawn on UI mini-map."""
+        print(f"\n[PookieBrain Tool] follow_drawn_path({len(waypoints)} waypoints)")
+        res = self.pursuit.follow_path(
+            waypoints=waypoints,
+            face_callback=self._face_callback
+        )
+        if res["success"]:
+            self.express("HAPPY", "happy")
+            return f"Successfully completed custom drawn trajectory in {res.get('steps', 0)} steps!"
+        else:
+            self.express("ALERT", "curious")
+            return f"Trajectory stopped: {res.get('reason')}."
+
+    def drive_circle(self, radius_m: float = 0.6) -> str:
+        """Tool: Execute a smooth circular trajectory."""
+        print(f"\n[PookieBrain Tool] drive_circle(radius={radius_m}m)")
+        curr_x, curr_y, _ = self.bridge.get_pose()
+        # Generate 16 circular waypoints
+        waypoints = []
+        for i in range(17):
+            angle = i * (2.0 * math.pi / 16.0)
+            wx = curr_x + radius_m * math.sin(angle)
+            wy = curr_y + radius_m * (1.0 - math.cos(angle))
+            waypoints.append((round(wx, 3), round(wy, 3)))
+        return self.follow_drawn_path(waypoints)
+
+    def drive_square(self, side_m: float = 0.7) -> str:
+        """Tool: Execute a geometric square patrol."""
+        print(f"\n[PookieBrain Tool] drive_square(side={side_m}m)")
+        curr_x, curr_y, _ = self.bridge.get_pose()
+        waypoints = [
+            (round(curr_x, 3), round(curr_y, 3)),
+            (round(curr_x + side_m, 3), round(curr_y, 3)),
+            (round(curr_x + side_m, 3), round(curr_y + side_m, 3)),
+            (round(curr_x, 3), round(curr_y + side_m, 3)),
+            (round(curr_x, 3), round(curr_y, 3)),
+        ]
+        return self.follow_drawn_path(waypoints)
+
+    def scan_room(self) -> str:
+        """Tool: 360-degree sweep detecting and logging all recognizable objects."""
+        print("\n[PookieBrain Tool] scan_room()")
+        self.express("CURIOUS", "curious")
+        if not self.vision:
+            return "Vision module required to scan room."
+
+        found_targets = []
+        for _ in range(12):
+            self.turn("left", angle_deg=30, speed_pwm=100)
+            frame = self.vision.capture_frame()
+            for t in [TargetType.RED_CUBE, TargetType.YELLOW_BALL, TargetType.GREEN_BOTTLE, TargetType.DOCKING_STATION]:
+                det = self.detector.detect(frame, t)
+                if det["found"] and t.value not in found_targets:
+                    found_targets.append(t.value)
+
+        self.express("HAPPY", "happy")
+        report = f"Scan complete! Identified: {', '.join(found_targets) if found_targets else 'no clear landmarks'}."
+        print(f"[PookieBrain Report] {report}")
+        return report
+
     # =========================================================================
     # Natural Language Command Dispatcher
     # =========================================================================
@@ -284,13 +387,27 @@ class PookieBrain:
         text = text.lower().strip()
         print(f"\n[PookieBrain] 🎙️ Processing command: '{text}'")
 
-        if any(w in text for w in ["dance", "celebrate", "spin", "party"]):
+        # Check for named target objects first ("go to red cube", "find yellow ball", "dock")
+        target_type = TargetDetector.resolve_target(text)
+        if target_type is not None and any(verb in text for verb in ["go", "find", "reach", "approach", "drive to", "navigate", "to", "target", "dock"]):
+            return self.navigate_to_target(target_type.value)
+
+        if any(w in text for w in ["circle", "drive in a circle", "spin circle"]):
+            return self.drive_circle()
+
+        elif any(w in text for w in ["square", "box pattern", "patrol square"]):
+            return self.drive_square()
+
+        elif any(w in text for w in ["scan room", "survey room", "look around room", "find toys"]):
+            return self.scan_room()
+
+        elif any(w in text for w in ["dance", "celebrate", "spin", "party"]):
             return self.dance()
 
         elif any(w in text for w in ["approach", "go to object", "come close", "near"]):
             return self.approach_object()
 
-        elif any(w in text for w in ["figure eight", "figure 8", "circle"]):
+        elif any(w in text for w in ["figure eight", "figure 8"]):
             return self.figure_eight()
 
         elif any(w in text for w in ["happy", "smile", "greet", "hello", "hi"]):
@@ -323,7 +440,17 @@ class PookieBrain:
             self.turn("right", angle_deg=45)
             return "Turned right."
 
-        elif any(w in text for w in ["look", "see", "inspect", "camera", "what do you see"]):
+        elif any(w in text for w in ["look", "see", "inspect", "camera", "what do you see", "describe"]):
+            if self.vision:
+                frame = self.vision.capture_frame()
+                plan = self.vlm.analyze_and_plan(frame, user_prompt=text)
+                self.express(plan.get("emotion", "HAPPY"))
+                spoken = plan.get("spoken_response", plan.get("scene_description", "All clear!"))
+                if self.face:
+                    self.face.send_response(spoken)
+                if plan.get("recommended_action") == "approach" and plan.get("action_target"):
+                    self.navigate_to_target(plan["action_target"])
+                return spoken
             analysis = self.inspect_scene()
             dist = analysis.get("obstacle_distance_cm", "clear")
             return f"I see the nursery area. Forward obstacle distance is {dist} cm."

@@ -201,6 +201,28 @@ Every physical AI project requires meticulous versioning to track physics calibr
    git push -u origin main
    ```
 
+### Lab 6: Closed-Loop Image-Based Visual Servoing (IBVS)
+In modern autonomous mobile robotics, heading toward objects cannot rely solely on open-loop odometry (which drifts due to wheel slip). Instead, we use Image-Based Visual Servoing (IBVS):
+1. The forward camera captures frames continuously.
+2. Centroid pixel offset $e_x = \frac{c_x - c_{\text{center}}}{c_{\text{center}}}$ generates a proportional differential yaw correction $\omega = -K_p \cdot e_x$.
+3. As the robot approaches the object, forward speed slows smoothly, and the HC-SR04 sonar safely halts motion at exactly $22\text{cm}$.
+4. Try saying or typing: `"go to red cube"`, `"go to yellow ball"`, `"go to green bottle"`, or `"dock"`.
+
+### Lab 7: Interactive Mini-Map Trajectory Following with Pure Pursuit
+1. Open the Web Face UI (`web/face.html`), and tap the **🗺️ Map** button.
+2. A 2D top-down nursery floor plan opens displaying the nursery crib, target objects, and PookieBot's real-time position and heading.
+3. Draw any curve with your finger or mouse across the floor, then tap **🚀 Send Path**.
+4. PookieBot calculates dynamic lookahead points along the curve and steers along your exact drawn trajectory using the **Pure Pursuit** controller!
+5. Try typing `"circle"` or `"square"` to watch PookieBot execute clean geometric trajectories.
+
+### Lab 8: Multimodal VLM Nursery Understanding with Gemini
+1. Configure your Gemini API key (optional):
+   ```powershell
+   $env:GEMINI_API_KEY="your-api-key"
+   ```
+2. Type or speak: `"what do you see in front of you?"` or `"describe the room"`.
+3. The VLM processes the visual scene from `robot_eye_camera`, identifies the spatial locations of objects (cube, ball, crib, dock), speaks a warm, child-friendly explanation, and triggers relevant actions!
+
 ---
 
 ## 4. Sim-to-Real Transferability Guarantee
@@ -211,6 +233,9 @@ Every piece of code built here was designed with **1:1 Hardware Parity**:
 | :--- | :--- | :--- |
 | `SimRobotBridge` | `RealRobotBridge` | **0 lines changed** (just pass `--mode real --port COM3`). |
 | `robot_eye_camera` (MuJoCo) | Smartphone Camera (OpenCV / WebRTC) | **0 lines changed** (implements `BaseVision.capture_frame()`). |
+| `TargetDetector` (OpenCV) | Real phone camera feed | **0 lines changed** (same HSV segmentation & ArUco detection). |
+| `PurePursuitController` | Real OpenBot chassis | **0 lines changed** (consumes `(x, y, yaw)` pose). |
+| `VLMAgent` (Gemini VLM) | Physical smartphone camera | **0 lines changed** (same multimodal prompt & JSON schema). |
 | `web/face.html` (Laptop Browser) | `web/face.html` (Phone Chrome Fullscreen) | **0 lines changed** (open `http://<laptop-ip>:8765` or load locally on phone). |
 | `VirtualOpenBotBridge` commands | Arduino `openbot.ino` firmware | **100% protocol identical** (`c<l>,<r>\n`, `s<dist>\n`). |
 

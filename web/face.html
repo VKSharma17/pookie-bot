@@ -131,12 +131,71 @@
       50% { transform: scale(1.08); }
       100% { transform: scale(1); }
     }
+
+    /* 2D Nursery Mini-Map & Trajectory Drawer Modal */
+    #minimap-panel {
+      position: absolute;
+      top: 60px;
+      right: 20px;
+      background: rgba(15, 23, 42, 0.94);
+      border: 1px solid rgba(56, 189, 248, 0.4);
+      border-radius: 18px;
+      padding: 12px;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(14px);
+      z-index: 50;
+    }
+
+    #minimap-header {
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      color: #38bdf8;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+    }
+
+    #map-canvas {
+      background: #090d1a;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 12px;
+      cursor: crosshair;
+      touch-action: none;
+    }
+
+    .map-tools {
+      display: flex;
+      gap: 6px;
+      width: 100%;
+      justify-content: center;
+    }
   </style>
 </head>
 <body>
 
   <div id="status-pill">PookieBot Face &bull; <span id="conn-status">CONNECTING...</span> &bull; Mood: <span id="emotion-label">NEUTRAL</span></div>
-  <div id="speech-hud">Click 🎙️ to talk or tap any maneuver below</div>
+  <div id="speech-hud">Click 🎙️ to talk, tap maneuvers, or open 🗺️ Map to draw paths!</div>
+
+  <!-- Nursery Mini-Map Drawer -->
+  <div id="minimap-panel">
+    <div id="minimap-header">
+      <span>🗺️ NURSERY TRAJECTORY DRAWER</span>
+      <button class="btn" style="padding:2px 8px;font-size:11px" onclick="toggleMiniMap()">✖</button>
+    </div>
+    <canvas id="map-canvas" width="320" height="320"></canvas>
+    <div style="font-size:11px;color:#94a3b8">Draw path with finger/mouse, then tap Send Path</div>
+    <div class="map-tools">
+      <button class="btn btn-action" onclick="sendDrawnPath()">🚀 Send Path</button>
+      <button class="btn" onclick="clearDrawnPath()">🧹 Clear</button>
+      <button class="btn" onclick="sendRobotCommand('circle')">⭕ Circle</button>
+    </div>
+  </div>
 
   <canvas id="face-canvas"></canvas>
 
@@ -144,23 +203,31 @@
     <!-- Live Voice Speech Control -->
     <button class="btn btn-mic" id="mic-btn" onclick="toggleVoiceRecognition()">🎙️ Speak</button>
 
-    <!-- Physical AI Maneuvers (Drives the MuJoCo robot car live!) -->
-    <button class="btn btn-action" onclick="sendRobotCommand('approach object')">🚀 Approach Object</button>
+    <!-- Mini-Map Toggle -->
+    <button class="btn btn-action" onclick="toggleMiniMap()">🗺️ Map</button>
+
+    <!-- Visual Servoing Targets -->
+    <button class="btn" style="color:#ef4444" onclick="sendRobotCommand('go to red cube')">🟥 Cube</button>
+    <button class="btn" style="color:#eab308" onclick="sendRobotCommand('go to yellow ball')">🟡 Ball</button>
+    <button class="btn" style="color:#22c55e" onclick="sendRobotCommand('go to green bottle')">🟢 Bottle</button>
+    <button class="btn" style="color:#38bdf8" onclick="sendRobotCommand('go to dock')">⚡ Dock</button>
+
+    <!-- Physical AI Maneuvers -->
     <button class="btn btn-action" onclick="sendRobotCommand('dance')">💃 Dance</button>
     <button class="btn btn-action" onclick="sendRobotCommand('patrol nursery')">🛡️ Patrol</button>
     <button class="btn btn-action" onclick="sendRobotCommand('sing lullaby')">🎵 Lullaby</button>
+    <button class="btn btn-action" onclick="sendRobotCommand('scan room')">🔍 Scan</button>
 
     <!-- Direct Motion -->
-    <button class="btn" onclick="sendRobotCommand('forward')">⬆️ Fwd</button>
-    <button class="btn" onclick="sendRobotCommand('backward')">⬇️ Back</button>
-    <button class="btn" onclick="sendRobotCommand('turn left')">⬅️ Left</button>
-    <button class="btn" onclick="sendRobotCommand('turn right')">➡️ Right</button>
-    <button class="btn" onclick="sendRobotCommand('stop')" style="color:#f87171">🛑 Stop</button>
+    <button class="btn" onclick="sendRobotCommand('forward')">⬆️</button>
+    <button class="btn" onclick="sendRobotCommand('backward')">⬇️</button>
+    <button class="btn" onclick="sendRobotCommand('turn left')">⬅️</button>
+    <button class="btn" onclick="sendRobotCommand('turn right')">➡️</button>
+    <button class="btn" onclick="sendRobotCommand('stop')" style="color:#f87171">🛑</button>
 
     <!-- Face Emotions -->
     <button class="btn" onclick="setEmotion('HAPPY')">Happy</button>
     <button class="btn" onclick="setEmotion('LOVING')">Love</button>
-    <button class="btn" onclick="setEmotion('SLEEPY')">Sleepy</button>
     <button class="btn" onclick="toggleFullscreen()">⛶ Full</button>
   </div>
 
@@ -496,6 +563,11 @@
             } else if (data.type === 'response' && data.text) {
               speechHud.innerText = `🤖 "${data.text}"`;
               speakText(data.text);
+            } else if (data.type === 'telemetry' && data.telemetry) {
+              if (data.telemetry.pose) {
+                robotPose = data.telemetry.pose;
+                if (isMapVisible) drawMiniMap();
+              }
             }
           } catch (e) {}
         };
@@ -568,6 +640,198 @@
       } else {
         recognition.start();
       }
+    }
+
+    // ========================================================
+    // 2D Nursery Mini-Map & Trajectory Drawer Engine
+    // ========================================================
+    const mapCanvas = document.getElementById('map-canvas');
+    const mapCtx = mapCanvas.getContext('2d');
+    const minimapPanel = document.getElementById('minimap-panel');
+
+    let isMapVisible = false;
+    let isDrawing = false;
+    let drawnWaypoints = [];
+    let robotPose = [0.0, 0.0, 0.0]; // [x (m), y (m), yaw (rad)]
+
+    const PPM = 48.0; // Pixels per meter scale
+    const ORIGIN_X = 160;
+    const ORIGIN_Y = 160;
+
+    function worldToCanvas(x, y) {
+      // In MuJoCo: +X is Forward (Up on screen), +Y is Left (Left on screen)
+      const cx = ORIGIN_X - (y * PPM);
+      const cy = ORIGIN_Y - (x * PPM);
+      return { x: cx, y: cy };
+    }
+
+    function canvasToWorld(px, py) {
+      const y = (ORIGIN_X - px) / PPM;
+      const x = (ORIGIN_Y - py) / PPM;
+      return [Math.round(x * 100) / 100, Math.round(y * 100) / 100];
+    }
+
+    function toggleMiniMap() {
+      isMapVisible = !isMapVisible;
+      minimapPanel.style.display = isMapVisible ? 'flex' : 'none';
+      if (isMapVisible) drawMiniMap();
+    }
+
+    function clearDrawnPath() {
+      drawnWaypoints = [];
+      drawMiniMap();
+    }
+
+    function sendDrawnPath() {
+      if (drawnWaypoints.length < 2) {
+        speechHud.innerText = "Please draw a path on the map first!";
+        return;
+      }
+      speechHud.innerText = `Dispatching drawn path (${drawnWaypoints.length} waypoints)...`;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'follow_path', waypoints: drawnWaypoints }));
+      }
+    }
+
+    // Pointer events for drawing trajectories on the mini-map
+    mapCanvas.addEventListener('pointerdown', (e) => {
+      isDrawing = true;
+      const rect = mapCanvas.getBoundingClientRect();
+      const pt = canvasToWorld(e.clientX - rect.left, e.clientY - rect.top);
+      drawnWaypoints = [pt];
+      drawMiniMap();
+    });
+
+    mapCanvas.addEventListener('pointermove', (e) => {
+      if (!isDrawing) return;
+      const rect = mapCanvas.getBoundingClientRect();
+      const pt = canvasToWorld(e.clientX - rect.left, e.clientY - rect.top);
+      // Filter out points too close to previous point (< 10cm)
+      const last = drawnWaypoints[drawnWaypoints.length - 1];
+      const dist = Math.hypot(pt[0] - last[0], pt[1] - last[1]);
+      if (dist >= 0.10) {
+        drawnWaypoints.push(pt);
+        drawMiniMap();
+      }
+    });
+
+    window.addEventListener('pointerup', () => {
+      isDrawing = false;
+    });
+
+    function drawMiniMap() {
+      mapCtx.clearRect(0, 0, 320, 320);
+
+      // 1. Grid lines (0.5m spacing)
+      mapCtx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+      mapCtx.lineWidth = 1;
+      for (let m = -3; m <= 3; m += 0.5) {
+        const pt = worldToCanvas(m, 0);
+        mapCtx.beginPath();
+        mapCtx.moveTo(0, pt.y);
+        mapCtx.lineTo(320, pt.y);
+        mapCtx.stroke();
+
+        const pt2 = worldToCanvas(0, m);
+        mapCtx.beginPath();
+        mapCtx.moveTo(pt2.x, 0);
+        mapCtx.lineTo(pt2.x, 320);
+        mapCtx.stroke();
+      }
+
+      // 2. Play Area Rug (Soft circle at x=0.4, y=0.0, r=1.4m)
+      const rug = worldToCanvas(0.4, 0.0);
+      mapCtx.fillStyle = 'rgba(241, 245, 249, 0.08)';
+      mapCtx.beginPath();
+      mapCtx.arc(rug.x, rug.y, 1.4 * PPM, 0, Math.PI * 2);
+      mapCtx.fill();
+      mapCtx.strokeStyle = 'rgba(241, 245, 249, 0.2)';
+      mapCtx.stroke();
+
+      // 3. Room Boundaries (-3m to +3m)
+      mapCtx.strokeStyle = 'rgba(56, 189, 248, 0.3)';
+      mapCtx.lineWidth = 2;
+      const nw = worldToCanvas(3.0, 3.0);
+      const se = worldToCanvas(-3.0, -3.0);
+      mapCtx.strokeRect(nw.x, nw.y, se.x - nw.x, se.y - nw.y);
+
+      // 4. Nursery Furniture & Target Landmarks
+      const landmarks = [
+        { name: "Crib 🛏️", x: -1.5, y: 2.0, color: "#cbd5e1", w: 30, h: 45 },
+        { name: "Cube 🟥", x: 0.85, y: 0.0, color: "#ef4444", w: 14, h: 14 },
+        { name: "Ball 🟡", x: 1.25, y: -0.55, color: "#eab308", radius: 7 },
+        { name: "Bottle 🟢", x: 0.70, y: 0.70, color: "#22c55e", radius: 6 },
+        { name: "Toybox 🟦", x: -0.75, y: -1.10, color: "#3b82f6", w: 18, h: 14 },
+        { name: "Dock ⚡", x: 2.90, y: 0.0, color: "#f8fafc", w: 10, h: 24 }
+      ];
+
+      for (const lm of landmarks) {
+        const c = worldToCanvas(lm.x, lm.y);
+        mapCtx.fillStyle = lm.color;
+        if (lm.radius) {
+          mapCtx.beginPath();
+          mapCtx.arc(c.x, c.y, lm.radius, 0, Math.PI * 2);
+          mapCtx.fill();
+        } else {
+          mapCtx.fillRect(c.x - lm.w / 2, c.y - lm.h / 2, lm.w, lm.h);
+        }
+        mapCtx.fillStyle = "rgba(255, 255, 255, 0.7)";
+        mapCtx.font = "9px sans-serif";
+        mapCtx.fillText(lm.name, c.x - 12, c.y - 10);
+      }
+
+      // 5. User Drawn Path
+      if (drawnWaypoints.length > 0) {
+        mapCtx.strokeStyle = "#4ade80";
+        mapCtx.lineWidth = 3;
+        mapCtx.setLineDash([4, 4]);
+        mapCtx.beginPath();
+        for (let i = 0; i < drawnWaypoints.length; i++) {
+          const wp = worldToCanvas(drawnWaypoints[i][0], drawnWaypoints[i][1]);
+          if (i === 0) mapCtx.moveTo(wp.x, wp.y);
+          else mapCtx.lineTo(wp.x, wp.y);
+        }
+        mapCtx.stroke();
+        mapCtx.setLineDash([]);
+
+        // Waypoint dots
+        for (let i = 0; i < drawnWaypoints.length; i++) {
+          const wp = worldToCanvas(drawnWaypoints[i][0], drawnWaypoints[i][1]);
+          mapCtx.fillStyle = (i === drawnWaypoints.length - 1) ? "#f43f5e" : "#4ade80";
+          mapCtx.beginPath();
+          mapCtx.arc(wp.x, wp.y, (i === drawnWaypoints.length - 1) ? 5 : 3, 0, Math.PI * 2);
+          mapCtx.fill();
+        }
+      }
+
+      // 6. Live Robot Body & Heading Arrow
+      const bot = worldToCanvas(robotPose[0], robotPose[1]);
+      const yaw = robotPose[2]; // Heading angle in radians (0 is +X/forward)
+
+      // Outer glow
+      mapCtx.fillStyle = "rgba(56, 189, 248, 0.3)";
+      mapCtx.beginPath();
+      mapCtx.arc(bot.x, bot.y, 10, 0, Math.PI * 2);
+      mapCtx.fill();
+
+      // Robot Chassis representation
+      mapCtx.fillStyle = "#38bdf8";
+      mapCtx.beginPath();
+      mapCtx.arc(bot.x, bot.y, 6, 0, Math.PI * 2);
+      mapCtx.fill();
+
+      // Heading arrow: In our map projection:
+      // dx_canvas = -sin(yaw) * len, dy_canvas = -cos(yaw) * len
+      const arrowLen = 14;
+      const headX = bot.x - Math.sin(yaw) * arrowLen;
+      const headY = bot.y - Math.cos(yaw) * arrowLen;
+
+      mapCtx.strokeStyle = "#ffffff";
+      mapCtx.lineWidth = 2.5;
+      mapCtx.beginPath();
+      mapCtx.moveTo(bot.x, bot.y);
+      mapCtx.lineTo(headX, headY);
+      mapCtx.stroke();
     }
 
     function toggleFullscreen() {

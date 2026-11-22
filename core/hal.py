@@ -10,7 +10,7 @@ Code written against BaseRobotBridge operates identically in:
 import time
 import threading
 from abc import ABC, abstractmethod
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 
 
 class BaseRobotBridge(ABC):
@@ -47,14 +47,20 @@ class BaseRobotBridge(ABC):
         """Return True if hardware safety cutoff is currently engaged."""
         return self.obstacle_stop_active
 
+    def get_pose(self) -> Tuple[float, float, float]:
+        """Return (x, y, yaw_rad) in world frame."""
+        return (0.0, 0.0, 0.0)
+
     def get_telemetry(self) -> Dict[str, Any]:
         """Return a snapshot of current telemetry data."""
+        x, y, yaw = self.get_pose()
         return {
             "cmd_left": self.cmd_left_pwm,
             "cmd_right": self.cmd_right_pwm,
             "sonar_m": self.latest_sonar_dist_m,
             "safety_stop": self.obstacle_stop_active,
-            "battery_v": self.battery_voltage
+            "battery_v": self.battery_voltage,
+            "pose": [round(x, 3), round(y, 3), round(yaw, 3)]
         }
 
 
@@ -134,6 +140,17 @@ class SimRobotBridge(BaseRobotBridge):
     def get_position(self):
         """Return 3D global position [x, y, z] of the robot body in simulation."""
         return self.data.xpos[self.body_robot_id].copy()
+
+    def get_pose(self) -> Tuple[float, float, float]:
+        """Return 2D pose (x, y, yaw_rad) in simulation world frame."""
+        import math
+        pos = self.data.xpos[self.body_robot_id]
+        q = self.data.xquat[self.body_robot_id]
+        qw, qx, qy, qz = q[0], q[1], q[2], q[3]
+        siny_cosp = 2.0 * (qw * qz + qx * qy)
+        cosy_cosp = 1.0 - 2.0 * (qy * qy + qz * qz)
+        yaw = math.atan2(siny_cosp, cosy_cosp)
+        return (float(pos[0]), float(pos[1]), float(yaw))
 
 
 class RealRobotBridge(BaseRobotBridge):

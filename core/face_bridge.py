@@ -35,6 +35,7 @@ class FaceBridgeServer:
         self.server_thread: Optional[threading.Thread] = None
         self.on_touch_callback: Optional[Callable[[str], None]] = None
         self.on_command_callback: Optional[Callable[[str], Any]] = None
+        self.on_path_callback: Optional[Callable[[list], Any]] = None
         self._running = False
 
     async def _handler(self, websocket):
@@ -58,6 +59,16 @@ class FaceBridgeServer:
                                     self.send_response(str(reply))
 
                             threading.Thread(target=run_cmd, args=(cmd_text,), daemon=True).start()
+
+                    elif msg_type == "follow_path" and self.on_path_callback:
+                        waypoints = data.get("waypoints", [])
+                        if waypoints:
+                            def run_path(pts):
+                                reply = self.on_path_callback(pts)
+                                if reply:
+                                    self.send_response(str(reply))
+
+                            threading.Thread(target=run_path, args=(waypoints,), daemon=True).start()
 
                     elif msg_type == "tap" and self.on_touch_callback:
                         self.on_touch_callback(data.get("region", "screen"))
@@ -99,6 +110,10 @@ class FaceBridgeServer:
     def send_response(self, text: str):
         """Send verbal text response to face display / speech synthesizer."""
         self._broadcast({"type": "response", "text": text})
+
+    def broadcast_telemetry(self, telemetry: dict):
+        """Broadcast live robot state (pose, sonar, safety) to web client."""
+        self._broadcast({"type": "telemetry", "telemetry": telemetry})
 
     def start(self):
         """Start the WebSocket server in a background daemon thread."""

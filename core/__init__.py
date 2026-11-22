@@ -12,6 +12,9 @@ from .hal import BaseRobotBridge, SimRobotBridge, RealRobotBridge, get_robot_bri
 from .face_bridge import FaceBridgeServer
 from .vision import BaseVision, SimVision, RealVision, get_vision
 from .agent_brain import PookieBrain
+from .visual_servoing import TargetDetector, TargetType, VisualServoingController
+from .path_follower import PurePursuitController
+from .vlm_agent import VLMAgent
 
 __all__ = [
     "BaseRobotBridge",
@@ -23,5 +26,10 @@ __all__ = [
     "SimVision",
     "RealVision",
     "get_vision",
-    "PookieBrain"
+    "PookieBrain",
+    "TargetDetector",
+    "TargetType",
+    "VisualServoingController",
+    "PurePursuitController",
+    "VLMAgent",
 ]
