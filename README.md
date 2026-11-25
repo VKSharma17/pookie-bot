@@ -73,7 +73,8 @@ Launch both the 3D physics world and the browser face connected live over WebSoc
 
 ## 📚 Documentation & Learning Guides
 
-* 🌟 **[LEARNING_LOG_AND_GUIDE.md](file:///d:/VKS/SelfMade/PookieBot/docs/LEARNING_LOG_AND_GUIDE.md)**: **The Live Learning Master Document**—detailed explanation of what, why, and how every module was built, SOTA as of Nov 2026, 5 interactive hands-on labs, and Sim-to-Real hardware transfer guide.
+* 🌟 **[PROJECT_CONTEXT.md](file:///d:/VKS/SelfMade/PookieBot/PROJECT_CONTEXT.md)**: **Single Source of Truth for Antigravity Projects**—complete state, calibrations, architecture, and handover notes.
+* 🌟 **[LEARNING_LOG_AND_GUIDE.md](file:///d:/VKS/SelfMade/PookieBot/docs/LEARNING_LOG_AND_GUIDE.md)**: **The Live Learning Master Document**—detailed explanation of what, why, and how every module was built, SOTA as of Nov 2026, 8 interactive hands-on labs (including IBVS visual servoing, Pure Pursuit path following, and Gemini VLM reasoning), and Sim-to-Real hardware transfer guide.
 * 📖 **[SYSTEM_ARCHITECTURE.md](file:///d:/VKS/SelfMade/PookieBot/docs/SYSTEM_ARCHITECTURE.md)**: Deep architectural dive into the 3-tier computing breakdown, communication protocols, and safety models.
 * 🛠️ **[HARDWARE_BOM.md](file:///d:/VKS/SelfMade/PookieBot/docs/HARDWARE_BOM.md)**: Exact component list, wiring pinouts, power distribution, and 3D printing options.
 * 🤖 **[OPENBOT_INTEGRATION.md](file:///d:/VKS/SelfMade/PookieBot/docs/OPENBOT_INTEGRATION.md)**: How PookieBot takes Intel OpenBot's mechanical chassis and USB-OTG serial link to the next level.
